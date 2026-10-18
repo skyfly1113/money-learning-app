@@ -1,0 +1,1561 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>우리 동네 미니 마트 사장님 - 어린이 화폐 놀이</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Canvas Confetti CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  <!-- React & React DOM CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel compiler CDN -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Google Fonts for Kids friendly theme -->
+  <link href="https://fonts.googleapis.com/css2?family=Jua&family=Gaegu:wght@700&display=swap" rel="stylesheet">
+  <style>
+    * {
+      font-family: 'Jua', cursive, sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+    }
+    .font-hand {
+      font-family: 'Gaegu', cursive;
+    }
+    @keyframes float-gentle {
+      0%, 100% { transform: translateY(-6px) rotate(-1deg); }
+      50% { transform: translateY(6px) rotate(1deg); }
+    }
+    .animate-float {
+      animation: float-gentle 3s ease-in-out infinite;
+    }
+    @keyframes wiggle {
+      0%, 100% { transform: rotate(-3deg); }
+      50% { transform: rotate(3deg); }
+    }
+    .animate-wiggle {
+      animation: wiggle 0.4s ease-in-out infinite;
+    }
+    .coin-shadow {
+      filter: drop-shadow(0px 6px 0px rgba(0,0,0,0.15));
+    }
+    .bill-shadow {
+      filter: drop-shadow(2px 8px 0px rgba(0,0,0,0.12));
+    }
+  </style>
+</head>
+<body class="bg-amber-50 text-slate-800 min-h-screen overflow-x-hidden selection:bg-pink-200">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo } = React;
+
+    // --- Web Audio Synthesizer Engine ---
+    const AudioEngine = {
+      ctx: null,
+      init() {
+        if (!this.ctx) {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          if (AudioContextClass) this.ctx = new AudioContextClass();
+        }
+        if (this.ctx && this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      },
+      playCoin() {
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc1 = this.ctx.createOscillator();
+        const osc2 = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+
+        osc1.type = 'sine';
+        osc2.type = 'triangle';
+        osc1.frequency.setValueAtTime(1400, now);
+        osc1.frequency.exponentialRampToValueAtTime(2400, now + 0.12);
+        osc2.frequency.setValueAtTime(2800, now);
+        osc2.frequency.exponentialRampToValueAtTime(3600, now + 0.12);
+
+        gain.gain.setValueAtTime(0.35, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+
+        osc1.connect(gain);
+        osc2.connect(gain);
+        gain.connect(this.ctx.destination);
+
+        osc1.start(now);
+        osc2.start(now);
+        osc1.stop(now + 0.22);
+        osc2.stop(now + 0.22);
+      },
+      playBill() {
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const bufferSize = this.ctx.sampleRate * 0.12;
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const output = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          output[i] = Math.random() * 2 - 1;
+        }
+        const whiteNoise = this.ctx.createBufferSource();
+        whiteNoise.buffer = buffer;
+
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(1500, now);
+        filter.Q.setValueAtTime(2.5, now);
+
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+
+        whiteNoise.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+
+        whiteNoise.start(now);
+      },
+      playSuccess() {
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+        notes.forEach((freq, idx) => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.value = freq;
+          const startTime = now + idx * 0.08;
+          gain.gain.setValueAtTime(0, startTime);
+          gain.gain.linearRampToValueAtTime(0.3, startTime + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.35);
+
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(startTime);
+          osc.stop(startTime + 0.35);
+        });
+      },
+      playTryAgain() {
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(392, now); // G4
+        osc.frequency.exponentialRampToValueAtTime(329.63, now + 0.25); // E4
+        gain.gain.setValueAtTime(0.25, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.28);
+      }
+    };
+
+    // --- Text-to-Speech Helper ---
+    const speakText = (text, enabled = true) => {
+      if (!enabled || !('speechSynthesis' in window)) return;
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'ko-KR';
+      utterance.rate = 0.92;
+      utterance.pitch = 1.25;
+      window.speechSynthesis.speak(utterance);
+    };
+
+    // --- ULTRA-REALISTIC KOREAN CURRENCY SVG COMPONENTS ---
+    
+    // 10 Won Coin (10원 - 다보탑 / 구리색)
+    const Coin10SVG = () => (
+      <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-md">
+        <defs>
+          <radialGradient id="coin10Grad" cx="35%" cy="35%" r="65%">
+            <stop offset="0%" stopColor="#ffb396" />
+            <stop offset="40%" stopColor="#d97757" />
+            <stop offset="85%" stopColor="#8c3a1e" />
+            <stop offset="100%" stopColor="#57210e" />
+          </radialGradient>
+          <linearGradient id="coin10Rim" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#ffe3d8" />
+            <stop offset="50%" stopColor="#b85333" />
+            <stop offset="100%" stopColor="#3d1407" />
+          </linearGradient>
+          <filter id="innerGlow10">
+            <feGaussianBlur stdDeviation="1.5" result="blur"/>
+            <feComposite in2="SourceAlpha" operator="arithmetic" k2="-1" k3="1" result="shadowDiff"/>
+            <feFlood floodColor="#3d1407" floodOpacity="0.6"/>
+            <feComposite in2="shadowDiff" operator="in"/>
+            <feComposite in2="SourceGraphic" operator="over"/>
+          </filter>
+        </defs>
+        
+        {/* Outer Beveled Rim */}
+        <circle cx="50" cy="50" r="48" fill="url(#coin10Rim)" />
+        <circle cx="50" cy="50" r="43" fill="url(#coin10Grad)" filter="url(#innerGlow10)" />
+        <circle cx="50" cy="50" r="41.5" fill="none" stroke="#fce2d7" strokeWidth="0.8" strokeOpacity="0.6" />
+        <circle cx="50" cy="50" r="40" fill="none" stroke="#5d2311" strokeWidth="0.8" strokeDasharray="1.5,1.5" opacity="0.7" />
+
+        {/* Dabotap Pagoda (다보탑) - Detailed Vector Silhouette */}
+        <g fill="#ffe0d3" opacity="0.95" transform="translate(50, 42) scale(0.85)">
+          {/* Base Steps */}
+          <rect x="-20" y="16" width="40" height="3" rx="0.5" />
+          <rect x="-16" y="12" width="32" height="4" />
+          <rect x="-12" y="6" width="24" height="6" />
+          {/* Four Pillars */}
+          <rect x="-10" y="-2" width="3" height="8" />
+          <rect x="-3" y="-2" width="2.5" height="8" />
+          <rect x="0.5" y="-2" width="2.5" height="8" />
+          <rect x="7" y="-2" width="3" height="8" />
+          {/* Middle Roof Tier */}
+          <path d="M-15,-2 L15,-2 L11,-7 L-11,-7 Z" />
+          <rect x="-8" y="-13" width="16" height="6" />
+          {/* Upper Roof Tier */}
+          <path d="M-11,-13 L11,-13 L8,-18 L-8,-18 Z" />
+          {/* Finial / Spire Top */}
+          <rect x="-3.5" y="-23" width="7" height="5" />
+          <polygon points="0,-29 -3.5,-23 3.5,-23" />
+          <circle cx="0" cy="-29" r="1.5" />
+        </g>
+
+        {/* Text Details */}
+        <text x="50" y="80" textAnchor="middle" fill="#ffe3d8" fillOpacity="0.95" fontSize="13.5" fontWeight="900" fontFamily="sans-serif" letterSpacing="0.5">10</text>
+        <text x="50" y="21" textAnchor="middle" fill="#ffe3d8" fillOpacity="0.9" fontSize="7" fontWeight="bold" fontFamily="sans-serif">한국은행</text>
+        <text x="50" y="91" textAnchor="middle" fill="#ffe3d8" fillOpacity="0.8" fontSize="5.5" fontFamily="sans-serif">십원</text>
+      </svg>
+    );
+
+    // 50 Won Coin (50원 - 벼이삭 / 황동색)
+    const Coin50SVG = () => (
+      <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-md">
+        <defs>
+          <radialGradient id="coin50Grad" cx="35%" cy="35%" r="65%">
+            <stop offset="0%" stopColor="#fff7d6" />
+            <stop offset="35%" stopColor="#e5be49" />
+            <stop offset="80%" stopColor="#9e7b13" />
+            <stop offset="100%" stopColor="#594403" />
+          </radialGradient>
+          <linearGradient id="coin50Rim" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#fffae8" />
+            <stop offset="50%" stopColor="#c29d21" />
+            <stop offset="100%" stopColor="#403000" />
+          </linearGradient>
+        </defs>
+        
+        <circle cx="50" cy="50" r="48" fill="url(#coin50Rim)" />
+        <circle cx="50" cy="50" r="43" fill="url(#coin50Grad)" />
+        <circle cx="50" cy="50" r="41.5" fill="none" stroke="#fffbe6" strokeWidth="0.8" strokeOpacity="0.7" />
+        <circle cx="50" cy="50" r="40" fill="none" stroke="#4d3b00" strokeWidth="0.8" strokeDasharray="2,1.5" opacity="0.6" />
+
+        {/* Rice Stalk Motif (벼이삭) */}
+        <g fill="#fffae6" stroke="#fffae6" strokeWidth="0.5" strokeLinecap="round" transform="translate(50, 44) scale(0.95)">
+          <path d="M0,18 Q-10,0 10,-22" fill="none" strokeWidth="2" />
+          {/* Grains */}
+          <ellipse cx="-6" cy="12" rx="2.5" ry="5" transform="rotate(-35 -6 12)" />
+          <ellipse cx="2" cy="7" rx="2.5" ry="5" transform="rotate(20 2 7)" />
+          <ellipse cx="-8" cy="1" rx="2.5" ry="5" transform="rotate(-40 -8 1)" />
+          <ellipse cx="4" cy="-4" rx="2.5" ry="5" transform="rotate(25 4 -4)" />
+          <ellipse cx="-6" cy="-11" rx="2.5" ry="5" transform="rotate(-25 -6 -11)" />
+          <ellipse cx="6" cy="-15" rx="2.2" ry="4.5" transform="rotate(30 6 -15)" />
+          <ellipse cx="8" cy="-22" rx="1.8" ry="4" transform="rotate(15 8 -22)" />
+        </g>
+
+        <text x="50" y="80" textAnchor="middle" fill="#fffae6" fontSize="14.5" fontWeight="900" fontFamily="sans-serif">50</text>
+        <text x="50" y="21" textAnchor="middle" fill="#fffae6" fontSize="7" fontWeight="bold" fontFamily="sans-serif">한국은행</text>
+        <text x="50" y="91" textAnchor="middle" fill="#fffae6" fontSize="5.5" fontFamily="sans-serif">오십원</text>
+      </svg>
+    );
+
+    // 100 Won Coin (100원 - 이순신 장군 / 백동 은색)
+    const Coin100SVG = () => (
+      <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-md">
+        <defs>
+          <radialGradient id="coin100Grad" cx="35%" cy="35%" r="65%">
+            <stop offset="0%" stopColor="#ffffff" />
+            <stop offset="40%" stopColor="#cbd5e1" />
+            <stop offset="80%" stopColor="#64748b" />
+            <stop offset="100%" stopColor="#334155" />
+          </radialGradient>
+          <linearGradient id="coin100Rim" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#f8fafc" />
+            <stop offset="50%" stopColor="#94a3b8" />
+            <stop offset="100%" stopColor="#1e293b" />
+          </linearGradient>
+        </defs>
+
+        <circle cx="50" cy="50" r="48" fill="url(#coin100Rim)" />
+        <circle cx="50" cy="50" r="43" fill="url(#coin100Grad)" />
+        <circle cx="50" cy="50" r="41.5" fill="none" stroke="#ffffff" strokeWidth="0.8" strokeOpacity="0.8" />
+        <circle cx="50" cy="50" r="40" fill="none" stroke="#1e293b" strokeWidth="0.8" strokeDasharray="2,2" opacity="0.6" />
+
+        {/* Admiral Yi Sun-sin Bust Profile (충무공 이순신 초상) */}
+        <g fill="#0f172a" opacity="0.85" transform="translate(50, 42) scale(0.9)">
+          {/* Traditional War Helmet (두정갑 투구) */}
+          <path d="M-12,-10 C-12,-22 0,-26 12,-22 C14,-16 12,-10 12,-10 Z" fill="#020617" />
+          <path d="M-16,-8 L16,-8 L14,-4 L-14,-4 Z" fill="#0f172a" />
+          <polygon points="0,-30 -2.5,-20 2.5,-20" fill="#020617" />
+          <circle cx="0" cy="-30" r="1.5" fill="#e2e8f0" />
+          {/* Face Profile & Beard */}
+          <path d="M-8,-4 Q-6,6 0,9 Q8,6 8,-4 Z" fill="#1e293b" />
+          <path d="M-8,3 Q0,16 8,3 Q5,18 -5,18 Z" fill="#020617" />
+          {/* Robe Collar */}
+          <path d="M-18,22 C-18,12 -8,10 0,10 C8,10 18,12 18,22 Z" fill="#0f172a" />
+        </g>
+
+        <text x="50" y="80" textAnchor="middle" fill="#020617" fontSize="15.5" fontWeight="900" fontFamily="sans-serif">100</text>
+        <text x="50" y="21" textAnchor="middle" fill="#020617" fontSize="7" fontWeight="bold" fontFamily="sans-serif">한국은행</text>
+        <text x="50" y="91" textAnchor="middle" fill="#334155" fontSize="5.5" fontFamily="sans-serif">백원</text>
+      </svg>
+    );
+
+    // 500 Won Coin (500원 - 두루미 / 큰 은색)
+    const Coin500SVG = () => (
+      <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-lg">
+        <defs>
+          <radialGradient id="coin500Grad" cx="35%" cy="35%" r="65%">
+            <stop offset="0%" stopColor="#ffffff" />
+            <stop offset="45%" stopColor="#e2e8f0" />
+            <stop offset="85%" stopColor="#64748b" />
+            <stop offset="100%" stopColor="#1e293b" />
+          </radialGradient>
+          <linearGradient id="coin500Rim" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#ffffff" />
+            <stop offset="50%" stopColor="#94a3b8" />
+            <stop offset="100%" stopColor="#0f172a" />
+          </linearGradient>
+        </defs>
+
+        <circle cx="50" cy="50" r="48" fill="url(#coin500Rim)" />
+        <circle cx="50" cy="50" r="43" fill="url(#coin500Grad)" />
+        <circle cx="50" cy="50" r="41.5" fill="none" stroke="#ffffff" strokeWidth="1" strokeOpacity="0.9" />
+        <circle cx="50" cy="50" r="40" fill="none" stroke="#0f172a" strokeWidth="0.8" strokeDasharray="2,2" opacity="0.6" />
+
+        {/* Soaring Crane Silhouette (두루미) */}
+        <g fill="#020617" opacity="0.88" transform="translate(50, 41) scale(0.9)">
+          <path d="M-14,2 Q0,-3 16,-10 C20,-12 24,-7 20,-3 Q8,8 -10,6 Z" />
+          <path d="M16,-10 C22,-14 26,-18 24,-22 C22,-24 19,-22 19,-20 C20,-17 17,-14 13,-12 Z" />
+          <path d="M1,-4 C-8,-20 -20,-24 -26,-22 C-21,-15 -8,-9 -1,-2 Z" />
+          <path d="M-5,2 C-12,13 -20,19 -24,23 C-20,19 -10,11 1,4 Z" opacity="0.75" />
+          <path d="M-14,4 L-26,13 M-12,5 L-24,16" stroke="#020617" strokeWidth="1.5" strokeLinecap="round" />
+        </g>
+
+        <text x="50" y="80" textAnchor="middle" fill="#020617" fontSize="16.5" fontWeight="900" fontFamily="sans-serif">500</text>
+        <text x="50" y="20" textAnchor="middle" fill="#020617" fontSize="7" fontWeight="bold" fontFamily="sans-serif">한국은행</text>
+        <text x="50" y="91" textAnchor="middle" fill="#334155" fontSize="5.5" fontFamily="sans-serif">오백원</text>
+      </svg>
+    );
+
+    // 1,000 Won Banknote (1,000원 - 퇴계 이황 / 파랑)
+    const Bill1000SVG = () => (
+      <svg viewBox="0 0 220 102" className="w-full h-full drop-shadow-md rounded-md overflow-hidden">
+        <defs>
+          <linearGradient id="bill1000Grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#2563eb" />
+            <stop offset="50%" stopColor="#1d4ed8" />
+            <stop offset="100%" stopColor="#1e40af" />
+          </linearGradient>
+          <pattern id="guilloche1000" width="16" height="16" patternUnits="userSpaceOnUse">
+            <path d="M 0 8 Q 4 0, 8 8 T 16 8" fill="none" stroke="#ffffff" strokeWidth="0.4" opacity="0.2" />
+            <path d="M 8 0 Q 12 8, 8 16 T 8 0" fill="none" stroke="#93c5fd" strokeWidth="0.4" opacity="0.2" />
+          </pattern>
+        </defs>
+
+        {/* Banknote Border & Micro Pattern */}
+        <rect x="2" y="2" width="216" height="98" rx="4" fill="url(#bill1000Grad)" stroke="#bfdbfe" strokeWidth="1.5" />
+        <rect x="5" y="5" width="210" height="92" rx="3" fill="url(#guilloche1000)" stroke="#ffffff" strokeWidth="0.6" strokeDasharray="3,1.5" opacity="0.7" />
+
+        {/* Silver Hologram Security Strip (은선) */}
+        <line x1="140" y1="5" x2="140" y2="97" stroke="#93c5fd" strokeWidth="2.5" strokeDasharray="6,4" opacity="0.85" />
+
+        {/* Left Watermark Oval (숨은그림) */}
+        <ellipse cx="38" cy="51" rx="22" ry="28" fill="#eff6ff" opacity="0.22" stroke="#ffffff" strokeWidth="1" strokeDasharray="2,2" />
+        <text x="38" y="55" textAnchor="middle" fill="#ffffff" fontSize="9" opacity="0.7" fontWeight="bold">한국은행</text>
+
+        {/* Center Background Motif (Myeongryundang & Plum Blossoms / 매화) */}
+        <g opacity="0.22" stroke="#ffffff" fill="none" strokeWidth="0.8">
+          <rect x="70" y="38" width="40" height="35" rx="1" />
+          <path d="M 65 38 L 90 22 L 115 38 Z" />
+          <circle cx="125" cy="30" r="4" fill="#ffffff" />
+          <circle cx="132" cy="40" r="3" fill="#ffffff" />
+        </g>
+
+        {/* Yi Hwang Portrait (퇴계 이황 초상화) */}
+        <g fill="#1e3a8a" opacity="0.9" transform="translate(154, 20)">
+          <path d="M 10 2 L 30 2 L 35 18 L 5 18 Z" fill="#0f172a" />
+          <path d="M 15 -4 L 25 -4 L 28 4 L 12 4 Z" fill="#0f172a" />
+          <path d="M 10 18 Q 20 22 30 18 L 32 38 Q 20 44 8 38 Z" fill="#1e293b" />
+          <path d="M 14 36 Q 20 52 26 36 Q 20 48 14 36 Z" fill="#0f172a" />
+          <path d="M -5 60 C 0 42 12 40 20 40 C 28 40 40 42 45 60 Z" fill="#0f172a" />
+        </g>
+
+        {/* Numbers and Official Labels */}
+        <text x="12" y="20" fill="#ffffff" fontSize="13" fontWeight="900" fontFamily="sans-serif">1000</text>
+        <text x="12" y="30" fill="#93c5fd" fontSize="6.5" fontFamily="monospace" letterSpacing="1">EC 0849201 A</text>
+        <text x="208" y="20" textAnchor="end" fill="#ffffff" fontSize="12" fontWeight="bold" fontFamily="sans-serif">천원</text>
+        <text x="12" y="88" fill="#ffffff" fontSize="17" fontWeight="900" fontFamily="sans-serif">1,000원</text>
+        <text x="208" y="88" textAnchor="end" fill="#bfdbfe" fontSize="7.5" fontWeight="bold" fontFamily="sans-serif">BANK OF KOREA</text>
+
+        <text x="100" y="55" textAnchor="middle" fill="#ffffff" fontSize="15" fontWeight="bold" fontFamily="sans-serif" letterSpacing="2">한국은행</text>
+        <text x="100" y="68" textAnchor="middle" fill="#93c5fd" fontSize="7.5" fontFamily="sans-serif">퇴계 이황</text>
+      </svg>
+    );
+
+    // 5,000 Won Banknote (5,000원 - 율곡 이이 / 주황)
+    const Bill5000SVG = () => (
+      <svg viewBox="0 0 220 102" className="w-full h-full drop-shadow-md rounded-md overflow-hidden">
+        <defs>
+          <linearGradient id="bill5000Grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#ea580c" />
+            <stop offset="50%" stopColor="#c2410c" />
+            <stop offset="100%" stopColor="#9a3412" />
+          </linearGradient>
+          <pattern id="guilloche5000" width="16" height="16" patternUnits="userSpaceOnUse">
+            <path d="M 0 8 Q 4 0, 8 8 T 16 8" fill="none" stroke="#ffffff" strokeWidth="0.4" opacity="0.2" />
+            <path d="M 8 0 Q 12 8, 8 16 T 8 0" fill="none" stroke="#ffedd5" strokeWidth="0.4" opacity="0.2" />
+          </pattern>
+        </defs>
+
+        <rect x="2" y="2" width="216" height="98" rx="4" fill="url(#bill5000Grad)" stroke="#fed7aa" strokeWidth="1.5" />
+        <rect x="5" y="5" width="210" height="92" rx="3" fill="url(#guilloche5000)" stroke="#ffffff" strokeWidth="0.6" strokeDasharray="3,1.5" opacity="0.7" />
+
+        {/* Silver Foil Hologram Patch */}
+        <rect x="132" y="32" width="12" height="36" rx="2" fill="#fed7aa" opacity="0.7" stroke="#ffffff" strokeWidth="1" />
+
+        <ellipse cx="38" cy="51" rx="22" ry="28" fill="#fff7ed" opacity="0.22" stroke="#ffffff" strokeWidth="1" strokeDasharray="2,2" />
+        <text x="38" y="55" textAnchor="middle" fill="#ffffff" fontSize="9" opacity="0.7" fontWeight="bold">한국은행</text>
+
+        {/* Center Background Motif (Ojukheon Bamboo / 오죽헌 & 초충도) */}
+        <g opacity="0.22" stroke="#ffffff" fill="none" strokeWidth="1">
+          <path d="M 75 80 L 75 22 M 82 80 L 82 22" strokeWidth="1.5" />
+          <path d="M 75 42 L 65 32 M 82 52 L 92 42" />
+        </g>
+
+        {/* Yi I Portrait (율곡 이이 초상화) */}
+        <g fill="#7c2d12" opacity="0.9" transform="translate(154, 20)">
+          <path d="M 10 2 L 30 2 L 35 18 L 5 18 Z" fill="#431407" />
+          <path d="M 15 -4 L 25 -4 L 28 4 L 12 4 Z" fill="#431407" />
+          <path d="M 10 18 Q 20 22 30 18 L 32 38 Q 20 44 8 38 Z" fill="#7c2d12" />
+          <path d="M 14 36 Q 20 50 26 36 Q 20 46 14 36 Z" fill="#431407" />
+          <path d="M -5 60 C 0 42 12 40 20 40 C 28 40 40 42 45 60 Z" fill="#431407" />
+        </g>
+
+        <text x="12" y="20" fill="#ffffff" fontSize="13" fontWeight="900" fontFamily="sans-serif">5000</text>
+        <text x="12" y="30" fill="#fed7aa" fontSize="6.5" fontFamily="monospace" letterSpacing="1">FA 3819402 B</text>
+        <text x="208" y="20" textAnchor="end" fill="#ffffff" fontSize="12" fontWeight="bold" fontFamily="sans-serif">오천원</text>
+        <text x="12" y="88" fill="#ffffff" fontSize="17" fontWeight="900" fontFamily="sans-serif">5,000원</text>
+        <text x="208" y="88" textAnchor="end" fill="#ffedd5" fontSize="7.5" fontWeight="bold" fontFamily="sans-serif">BANK OF KOREA</text>
+
+        <text x="96" y="55" textAnchor="middle" fill="#ffffff" fontSize="15" fontWeight="bold" fontFamily="sans-serif" letterSpacing="2">한국은행</text>
+        <text x="96" y="68" textAnchor="middle" fill="#fed7aa" fontSize="7.5" fontFamily="sans-serif">율곡 이이</text>
+      </svg>
+    );
+
+    // 10,000 Won Banknote (10,000원 - 세종대왕 / 초록)
+    const Bill10000SVG = () => (
+      <svg viewBox="0 0 220 102" className="w-full h-full drop-shadow-md rounded-md overflow-hidden">
+        <defs>
+          <linearGradient id="bill10000Grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#059669" />
+            <stop offset="50%" stopColor="#047857" />
+            <stop offset="100%" stopColor="#064e3b" />
+          </linearGradient>
+          <pattern id="guilloche10000" width="16" height="16" patternUnits="userSpaceOnUse">
+            <path d="M 0 8 Q 4 0, 8 8 T 16 8" fill="none" stroke="#ffffff" strokeWidth="0.4" opacity="0.2" />
+            <path d="M 8 0 Q 12 8, 8 16 T 8 0" fill="none" stroke="#a7f3d0" strokeWidth="0.4" opacity="0.2" />
+          </pattern>
+        </defs>
+
+        <rect x="2" y="2" width="216" height="98" rx="4" fill="url(#bill10000Grad)" stroke="#a7f3d0" strokeWidth="1.5" />
+        <rect x="5" y="5" width="210" height="92" rx="3" fill="url(#guilloche10000)" stroke="#ffffff" strokeWidth="0.6" strokeDasharray="3,1.5" opacity="0.7" />
+
+        {/* Hologram Foil Strip */}
+        <rect x="68" y="5" width="8" height="92" fill="#a7f3d0" opacity="0.6" stroke="#ffffff" strokeWidth="0.8" />
+
+        <ellipse cx="38" cy="51" rx="22" ry="28" fill="#ecfdf5" opacity="0.22" stroke="#ffffff" strokeWidth="1" strokeDasharray="2,2" />
+        <text x="38" y="55" textAnchor="middle" fill="#ffffff" fontSize="9" opacity="0.7" fontWeight="bold">한국은행</text>
+
+        {/* Sun, Moon & Five Peaks Screen Motif (일월오봉도) */}
+        <g opacity="0.28" fill="#ffffff" stroke="#ffffff" strokeWidth="0.8">
+          <circle cx="88" cy="30" r="5" fill="#ffffff" />
+          <circle cx="130" cy="30" r="5" fill="none" strokeWidth="1" />
+          <polygon points="80,72 90,40 100,72" />
+          <polygon points="96,72 110,30 124,72" />
+          <polygon points="120,72 130,42 140,72" />
+        </g>
+
+        {/* King Sejong Portrait (세종대왕 초상화) */}
+        <g fill="#064e3b" opacity="0.9" transform="translate(154, 18)">
+          <path d="M 8 10 C 8 0 32 0 32 10 L 36 20 L 4 20 Z" fill="#022c22" />
+          <path d="M 12 -2 C 12 -8 28 -8 28 -2 L 30 8 L 10 8 Z" fill="#022c22" />
+          <path d="M 8 20 Q 20 24 32 20 L 34 38 Q 20 46 6 38 Z" fill="#064e3b" />
+          <path d="M 12 36 Q 20 52 28 36 Q 20 48 12 36 Z" fill="#022c22" />
+          <path d="M -6 60 C -2 40 10 38 20 38 C 30 38 42 40 46 60 Z" fill="#022c22" />
+          <circle cx="20" cy="46" r="4" fill="#f59e0b" opacity="0.9" />
+        </g>
+
+        <text x="12" y="20" fill="#ffffff" fontSize="13" fontWeight="900" fontFamily="sans-serif">10000</text>
+        <text x="12" y="30" fill="#a7f3d0" fontSize="6.5" fontFamily="monospace" letterSpacing="1">GA 7729103 C</text>
+        <text x="208" y="20" textAnchor="end" fill="#ffffff" fontSize="12" fontWeight="bold" fontFamily="sans-serif">만원</text>
+        <text x="12" y="88" fill="#ffffff" fontSize="17" fontWeight="900" fontFamily="sans-serif">10,000원</text>
+        <text x="208" y="88" textAnchor="end" fill="#a7f3d0" fontSize="7.5" fontWeight="bold" fontFamily="sans-serif">BANK OF KOREA</text>
+
+        <text x="108" y="55" textAnchor="middle" fill="#ffffff" fontSize="15" fontWeight="bold" fontFamily="sans-serif" letterSpacing="2">한국은행</text>
+        <text x="108" y="68" textAnchor="middle" fill="#a7f3d0" fontSize="7.5" fontFamily="sans-serif">세종대왕</text>
+      </svg>
+    );
+
+    // 50,000 Won Banknote (50,000원 - 신사임당 / 황금 노랑)
+    const Bill50000SVG = () => (
+      <svg viewBox="0 0 220 102" className="w-full h-full drop-shadow-md rounded-md overflow-hidden">
+        <defs>
+          <linearGradient id="bill50000Grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#eab308" />
+            <stop offset="50%" stopColor="#ca8a04" />
+            <stop offset="100%" stopColor="#854d0e" />
+          </linearGradient>
+          <pattern id="guilloche50000" width="16" height="16" patternUnits="userSpaceOnUse">
+            <path d="M 0 8 Q 4 0, 8 8 T 16 8" fill="none" stroke="#ffffff" strokeWidth="0.4" opacity="0.22" />
+            <path d="M 8 0 Q 12 8, 8 16 T 8 0" fill="none" stroke="#fef08a" strokeWidth="0.4" opacity="0.22" />
+          </pattern>
+        </defs>
+
+        <rect x="2" y="2" width="216" height="98" rx="4" fill="url(#bill50000Grad)" stroke="#fef08a" strokeWidth="1.5" />
+        <rect x="5" y="5" width="210" height="92" rx="3" fill="url(#guilloche50000)" stroke="#ffffff" strokeWidth="0.6" strokeDasharray="3,1.5" opacity="0.75" />
+
+        {/* Wide Metallic Silver Hologram Band */}
+        <rect x="22" y="5" width="14" height="92" fill="#fef08a" opacity="0.65" stroke="#ffffff" strokeWidth="1" />
+
+        <ellipse cx="50" cy="51" rx="20" ry="26" fill="#fefce8" opacity="0.25" stroke="#ffffff" strokeWidth="1" strokeDasharray="2,2" />
+        <text x="50" y="55" textAnchor="middle" fill="#ffffff" fontSize="8.5" opacity="0.75" fontWeight="bold">한국은행</text>
+
+        {/* Center Artwork Motif (Plum Blossom & Bamboo / 초충도) */}
+        <g opacity="0.25" fill="none" stroke="#ffffff" strokeWidth="0.9">
+          <circle cx="105" cy="35" r="8" strokeWidth="1" />
+          <path d="M 105 43 Q 115 55 125 45" />
+          <path d="M 90 70 C 100 50 110 50 120 70" />
+        </g>
+
+        {/* Shin Saimdang Portrait (신사임당 초상화) */}
+        <g fill="#713f12" opacity="0.92" transform="translate(156, 18)">
+          <path d="M 12 2 C 0 2 0 16 12 16 C 24 16 24 2 12 2 Z" fill="#422006" />
+          <path d="M 12 16 Q 20 22 28 18 L 30 38 Q 18 46 6 38 Z" fill="#713f12" />
+          <path d="M -4 60 C 0 40 10 38 18 38 C 26 38 36 40 40 60 Z" fill="#422006" />
+          <line x1="2" y1="10" x2="22" y2="10" stroke="#fef08a" strokeWidth="2" strokeLinecap="round" />
+        </g>
+
+        <text x="12" y="20" fill="#ffffff" fontSize="12" fontWeight="900" fontFamily="sans-serif">50000</text>
+        <text x="12" y="30" fill="#fef08a" fontSize="6" fontFamily="monospace" letterSpacing="1">HD 4567890 D</text>
+        <text x="208" y="20" textAnchor="end" fill="#ffffff" fontSize="12" fontWeight="bold" fontFamily="sans-serif">오만원</text>
+        <text x="12" y="88" fill="#ffffff" fontSize="17" fontWeight="900" fontFamily="sans-serif">50,000원</text>
+        <text x="208" y="88" textAnchor="end" fill="#fef08a" fontSize="7.5" fontWeight="bold" fontFamily="sans-serif">BANK OF KOREA</text>
+
+        <text x="108" y="55" textAnchor="middle" fill="#ffffff" fontSize="15" fontWeight="bold" fontFamily="sans-serif" letterSpacing="2">한국은행</text>
+        <text x="108" y="68" textAnchor="middle" fill="#fef08a" fontSize="7.5" fontFamily="sans-serif">신사임당</text>
+      </svg>
+    );
+
+    // --- Currency Visual Component ---
+    const CurrencyVisual = ({ value, onClick, scale = 1, showLabel = true, className = "" }) => {
+      const handleClick = () => {
+        if (value >= 1000) {
+          AudioEngine.playBill();
+        } else {
+          AudioEngine.playCoin();
+        }
+        if (onClick) onClick(value);
+      };
+
+      // Accurate relative proportions for South Korean Coins & Banknotes
+      switch (value) {
+        case 10:
+          return (
+            <button 
+              onClick={handleClick}
+              style={{ transform: `scale(${scale})` }}
+              className={`w-14 h-14 hover:scale-110 active:scale-95 transition-transform cursor-pointer focus:outline-none ${className}`}
+              title="10원 동전 (다보탑)"
+            >
+              <Coin10SVG />
+            </button>
+          );
+        case 50:
+          return (
+            <button 
+              onClick={handleClick}
+              style={{ transform: `scale(${scale})` }}
+              className={`w-16 h-16 hover:scale-110 active:scale-95 transition-transform cursor-pointer focus:outline-none ${className}`}
+              title="50원 동전 (벼이삭)"
+            >
+              <Coin50SVG />
+            </button>
+          );
+        case 100:
+          return (
+            <button 
+              onClick={handleClick}
+              style={{ transform: `scale(${scale})` }}
+              className={`w-20 h-20 hover:scale-110 active:scale-95 transition-transform cursor-pointer focus:outline-none ${className}`}
+              title="100원 동전 (이순신 장군)"
+            >
+              <Coin100SVG />
+            </button>
+          );
+        case 500:
+          return (
+            <button 
+              onClick={handleClick}
+              style={{ transform: `scale(${scale})` }}
+              className={`w-24 h-24 hover:scale-110 active:scale-95 transition-transform cursor-pointer focus:outline-none ${className}`}
+              title="500원 동전 (두루미)"
+            >
+              <Coin500SVG />
+            </button>
+          );
+        case 1000:
+          return (
+            <button 
+              onClick={handleClick}
+              style={{ transform: `scale(${scale})` }}
+              className={`w-38 h-20 hover:scale-105 active:scale-95 transition-transform cursor-pointer focus:outline-none ${className}`}
+              title="1,000원 지폐 (퇴계 이황)"
+            >
+              <Bill1000SVG />
+            </button>
+          );
+        case 5000:
+          return (
+            <button 
+              onClick={handleClick}
+              style={{ transform: `scale(${scale})` }}
+              className={`w-40 h-22 hover:scale-105 active:scale-95 transition-transform cursor-pointer focus:outline-none ${className}`}
+              title="5,000원 지폐 (율곡 이이)"
+            >
+              <Bill5000SVG />
+            </button>
+          );
+        case 10000:
+          return (
+            <button 
+              onClick={handleClick}
+              style={{ transform: `scale(${scale})` }}
+              className={`w-44 h-24 hover:scale-105 active:scale-95 transition-transform cursor-pointer focus:outline-none ${className}`}
+              title="10,000원 지폐 (세종대왕)"
+            >
+              <Bill10000SVG />
+            </button>
+          );
+        case 50000:
+          return (
+            <button 
+              onClick={handleClick}
+              style={{ transform: `scale(${scale})` }}
+              className={`w-48 h-26 hover:scale-105 active:scale-95 transition-transform cursor-pointer focus:outline-none ${className}`}
+              title="50,000원 지폐 (신사임당)"
+            >
+              <Bill50000SVG />
+            </button>
+          );
+        default:
+          return null;
+      }
+    };
+
+    // --- Helper Helper Character Avatar & Speech Bubble ---
+    const CharacterGuide = ({ character = 'dondoni', message, audioEnabled = true }) => {
+      useEffect(() => {
+        if (message) {
+          speakText(message, audioEnabled);
+        }
+      }, [message, audioEnabled]);
+
+      const isPig = character === 'dondoni';
+
+      return (
+        <div className="flex items-center space-x-3 bg-white/90 backdrop-blur-sm p-3 rounded-2xl border-4 border-amber-300 shadow-lg my-2 max-w-2xl mx-auto">
+          <div className="relative flex-shrink-0 animate-bounce-slow">
+            <div className={`w-16 h-16 rounded-full border-4 flex items-center justify-center text-3xl shadow-inner ${isPig ? 'bg-pink-100 border-pink-400' : 'bg-amber-100 border-amber-500'}`}>
+              {isPig ? '🐷' : '🐿️'}
+            </div>
+            <div className="absolute -bottom-1 -right-1 bg-yellow-400 text-xs px-1.5 py-0.5 rounded-full font-bold border border-amber-600">
+              {isPig ? '돈돈이' : '토리'}
+            </div>
+          </div>
+          <div className="flex-1">
+            <p className="text-lg md:text-xl text-slate-800 leading-snug font-bold">
+              "{message}"
+            </p>
+          </div>
+          <button 
+            onClick={() => speakText(message, audioEnabled)}
+            className="p-2 bg-amber-100 hover:bg-amber-200 rounded-full text-amber-800 transition-colors"
+            title="다시 듣기"
+          >
+            🔊
+          </button>
+        </div>
+      );
+    };
+
+    // --- STAGE 1: 화폐와 친해지기 ---
+    const Stage1 = ({ onSuccess, character, audioEnabled }) => {
+      const [subMode, setSubMode] = useState('sort'); // 'sort' or 'compare'
+      
+      // Sort mode state
+      const [targetCoin, setTargetCoin] = useState(100);
+      const [sortScore, setSortScore] = useState(0);
+
+      // Compare mode state
+      const [comparePair, setComparePair] = useState({ left: 500, right: 100 });
+      const [compareScore, setCompareScore] = useState(0);
+
+      const coinTypes = [10, 50, 100, 500];
+
+      // Setup random coin for sort
+      const nextSortQuestion = () => {
+        const rand = coinTypes[Math.floor(Math.random() * coinTypes.length)];
+        setTargetCoin(rand);
+      };
+
+      // Setup random pair for compare
+      const nextCompareQuestion = () => {
+        const p1 = coinTypes[Math.floor(Math.random() * coinTypes.length)];
+        let p2 = coinTypes[Math.floor(Math.random() * coinTypes.length)];
+        while (p1 === p2) {
+          p2 = coinTypes[Math.floor(Math.random() * coinTypes.length)];
+        }
+        setComparePair({ left: p1, right: p2 });
+      };
+
+      useEffect(() => {
+        nextSortQuestion();
+        nextCompareQuestion();
+      }, []);
+
+      const handleSortDrop = (selectedVal) => {
+        if (selectedVal === targetCoin) {
+          AudioEngine.playSuccess();
+          if (window.confetti) confetti({ particleCount: 35, spread: 60, origin: { y: 0.7 } });
+          const newScore = sortScore + 1;
+          setSortScore(newScore);
+          if (newScore >= 4) {
+            onSuccess(15); // Reward coins
+          } else {
+            nextSortQuestion();
+          }
+        } else {
+          AudioEngine.playTryAgain();
+          speakText("아쉬워요! 크기가 맞는 저금통을 찾아볼까요?", audioEnabled);
+        }
+      };
+
+      const handleComparePick = (pickedVal) => {
+        const higherVal = Math.max(comparePair.left, comparePair.right);
+        if (pickedVal === higherVal) {
+          AudioEngine.playSuccess();
+          if (window.confetti) confetti({ particleCount: 40, spread: 70, origin: { y: 0.7 } });
+          const newScore = compareScore + 1;
+          setCompareScore(newScore);
+          if (newScore >= 4) {
+            onSuccess(20);
+          } else {
+            nextCompareQuestion();
+          }
+        } else {
+          AudioEngine.playTryAgain();
+          speakText("더 큰 가치의 동전을 찾아봐요!", audioEnabled);
+        }
+      };
+
+      return (
+        <div className="space-y-6">
+          {/* Submode Switcher */}
+          <div className="flex justify-center space-x-3">
+            <button
+              onClick={() => setSubMode('sort')}
+              className={`px-5 py-2.5 rounded-full font-bold text-lg shadow-md transition-all ${subMode === 'sort' ? 'bg-pink-500 text-white ring-4 ring-pink-200' : 'bg-white text-slate-600'}`}
+            >
+              1-1. 저금통에 쏙! (크기 인지)
+            </button>
+            <button
+              onClick={() => setSubMode('compare')}
+              className={`px-5 py-2.5 rounded-full font-bold text-lg shadow-md transition-all ${subMode === 'compare' ? 'bg-pink-500 text-white ring-4 ring-pink-200' : 'bg-white text-slate-600'}`}
+            >
+              1-2. 누가 더 클까? (가치 비교)
+            </button>
+          </div>
+
+          {subMode === 'sort' ? (
+            <div>
+              <CharacterGuide 
+                character={character} 
+                message={`화면에 보이는 ${targetCoin}원 동전을 알맞은 저금통 구멍으로 쏙 넣어주세요!`} 
+                audioEnabled={audioEnabled}
+              />
+
+              <div className="bg-amber-100/70 p-6 rounded-3xl border-4 border-amber-200 text-center max-w-xl mx-auto shadow-inner">
+                <p className="text-slate-600 font-bold mb-4">나온 동전:</p>
+                <div className="flex justify-center my-4 animate-bounce-slow">
+                  <CurrencyVisual value={targetCoin} />
+                </div>
+
+                <p className="text-slate-700 font-bold mt-8 mb-4">알맞은 저금통을 터치하세요!</p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {coinTypes.map((val) => (
+                    <button
+                      key={val}
+                      onClick={() => handleSortDrop(val)}
+                      className="bg-white p-4 rounded-2xl border-4 border-amber-300 hover:border-pink-400 hover:bg-pink-50 transition-all flex flex-col items-center justify-center space-y-2 shadow-md active:scale-95"
+                    >
+                      <span className="text-4xl">🐖</span>
+                      <span className="text-xl font-bold text-amber-900">{val}원 저금통</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <CharacterGuide 
+                character={character} 
+                message="두 동전 중에서 더 돈이 큰(가치가 높은) 동전을 터치해서 맛있는 간식을 선물해요!" 
+                audioEnabled={audioEnabled}
+              />
+
+              <div className="bg-amber-100/70 p-8 rounded-3xl border-4 border-amber-200 text-center max-w-xl mx-auto shadow-inner">
+                <div className="flex justify-around items-center my-6">
+                  <div className="p-4 bg-white rounded-2xl border-4 border-amber-300 shadow-md">
+                    <CurrencyVisual value={comparePair.left} onClick={() => handleComparePick(comparePair.left)} />
+                  </div>
+                  <span className="text-3xl font-bold text-amber-700">VS</span>
+                  <div className="p-4 bg-white rounded-2xl border-4 border-amber-300 shadow-md">
+                    <CurrencyVisual value={comparePair.right} onClick={() => handleComparePick(comparePair.right)} />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // --- STAGE 2: 같은 화폐 모아 세기 ---
+    const Stage2 = ({ onSuccess, character, audioEnabled }) => {
+      const [subMode, setSubMode] = useState('train'); // 'train' or 'wallet'
+      
+      // Train mode state
+      const [trainCoins, setTrainCoins] = useState([]);
+      const targetCount = 4; // 400 won target
+      
+      // Wallet mode state
+      const [walletNotes, setWalletNotes] = useState([1000, 1000, 1000]);
+
+      const handleTrainAdd = () => {
+        if (trainCoins.length < targetCount) {
+          const nextVal = (trainCoins.length + 1) * 100;
+          const updated = [...trainCoins, 100];
+          setTrainCoins(updated);
+          AudioEngine.playCoin();
+          speakText(`${nextVal}원!`, audioEnabled);
+
+          if (updated.length === targetCount) {
+            setTimeout(() => {
+              AudioEngine.playSuccess();
+              if (window.confetti) confetti({ particleCount: 50, spread: 80, origin: { y: 0.6 } });
+              onSuccess(20);
+            }, 600);
+          }
+        }
+      };
+
+      const handleWalletAnswer = (ans) => {
+        const total = walletNotes.reduce((a, b) => a + b, 0);
+        if (ans === total) {
+          AudioEngine.playSuccess();
+          if (window.confetti) confetti({ particleCount: 50, spread: 80, origin: { y: 0.6 } });
+          onSuccess(25);
+        } else {
+          AudioEngine.playTryAgain();
+          speakText("지갑 속 1,000원 지폐를 하나씩 천천히 세어봐요!", audioEnabled);
+        }
+      };
+
+      return (
+        <div className="space-y-6">
+          <div className="flex justify-center space-x-3">
+            <button
+              onClick={() => setSubMode('train')}
+              className={`px-5 py-2.5 rounded-full font-bold text-lg shadow-md transition-all ${subMode === 'train' ? 'bg-sky-500 text-white ring-4 ring-sky-200' : 'bg-white text-slate-600'}`}
+            >
+              2-1. 100원 기차 칙칙폭폭!
+            </button>
+            <button
+              onClick={() => setSubMode('wallet')}
+              className={`px-5 py-2.5 rounded-full font-bold text-lg shadow-md transition-all ${subMode === 'wallet' ? 'bg-sky-500 text-white ring-4 ring-sky-200' : 'bg-white text-slate-600'}`}
+            >
+              2-2. 지갑 속 지폐 세기
+            </button>
+          </div>
+
+          {subMode === 'train' ? (
+            <div>
+              <CharacterGuide 
+                character={character} 
+                message="100원 동전을 하나씩 싣고 400원 기차를 완성해보세요!" 
+                audioEnabled={audioEnabled}
+              />
+
+              <div className="bg-sky-50 p-6 rounded-3xl border-4 border-sky-200 max-w-2xl mx-auto shadow-inner text-center">
+                {/* Train animation line */}
+                <div className="flex items-center justify-start space-x-2 overflow-x-auto p-4 bg-slate-800 rounded-2xl mb-6 shadow-md min-h-[120px]">
+                  <div className="text-4xl px-3 text-yellow-300 font-bold flex flex-col items-center">
+                    <span>🚂</span>
+                    <span className="text-xs text-white">출발!</span>
+                  </div>
+                  {Array.from({ length: targetCount }).map((_, idx) => (
+                    <div key={idx} className="w-20 h-20 border-2 border-dashed border-sky-300 rounded-2xl flex items-center justify-center bg-slate-700/50">
+                      {trainCoins[idx] ? (
+                        <CurrencyVisual value={100} scale={0.8} />
+                      ) : (
+                        <span className="text-slate-400 text-sm font-bold">{idx + 1}번째</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <p className="text-slate-700 font-bold mb-4">아래 동전을 눌러 기차에 실어주세요!</p>
+                <div className="flex justify-center">
+                  <CurrencyVisual value={100} onClick={handleTrainAdd} />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <CharacterGuide 
+                character={character} 
+                message="지갑 속에 1,000원짜리 지폐가 3장 있어요! 총 얼마일까요?" 
+                audioEnabled={audioEnabled}
+              />
+
+              <div className="bg-sky-50 p-6 rounded-3xl border-4 border-sky-200 max-w-xl mx-auto shadow-inner text-center space-y-6">
+                <div className="bg-amber-800 p-6 rounded-3xl border-4 border-amber-900 shadow-xl flex justify-center items-center space-x-2">
+                  <span className="text-4xl mr-2">👛</span>
+                  <div className="flex -space-x-8">
+                    {walletNotes.map((note, idx) => (
+                      <CurrencyVisual key={idx} value={note} scale={0.9} />
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  {[2000, 3000, 5000].map((ans) => (
+                    <button
+                      key={ans}
+                      onClick={() => handleWalletAnswer(ans)}
+                      className="py-4 bg-white border-4 border-sky-300 hover:border-sky-500 rounded-2xl font-bold text-2xl text-slate-800 shadow-md hover:bg-sky-100 transition-all active:scale-95"
+                    >
+                      {ans.toLocaleString()}원
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // --- STAGE 3: 알뜰살뜰 장보기 ---
+    const Stage3 = ({ onSuccess, character, audioEnabled, theme }) => {
+      const [subMode, setSubMode] = useState('checkout'); // 'checkout' or 'change'
+
+      // Checkout mode state
+      const [tableMoney, setTableMoney] = useState([]);
+      const targetPrice = 700; // 500 + 100 + 100
+
+      // Change mode state
+      const [givenMoney] = useState(1000);
+      const [itemPrice] = useState(800);
+      const expectedChange = 200;
+
+      const currentSum = useMemo(() => {
+        return tableMoney.reduce((acc, curr) => acc + curr, 0);
+      }, [tableMoney]);
+
+      const addMoney = (val) => {
+        setTableMoney([...tableMoney, val]);
+      };
+
+      const clearTable = () => {
+        setTableMoney([]);
+      };
+
+      const checkCheckout = () => {
+        if (currentSum === targetPrice) {
+          AudioEngine.playSuccess();
+          if (window.confetti) confetti({ particleCount: 60, spread: 90, origin: { y: 0.6 } });
+          onSuccess(30);
+        } else {
+          AudioEngine.playTryAgain();
+          speakText(`지금 내신 돈은 ${currentSum}원이에요. 700원에 맞게 더 올려봐요!`, audioEnabled);
+        }
+      };
+
+      const handleChangePick = (picked) => {
+        if (picked === expectedChange) {
+          AudioEngine.playSuccess();
+          if (window.confetti) confetti({ particleCount: 60, spread: 90, origin: { y: 0.6 } });
+          onSuccess(30);
+        } else {
+          AudioEngine.playTryAgain();
+          speakText("1,000원에서 800원짜리 빵 값을 빼면 거스름돈은 얼마일까요?", audioEnabled);
+        }
+      };
+
+      const getThemeInfo = () => {
+        switch(theme) {
+          case 'fruit': return { name: '과일 가게', emoji: '🍎', item: '700원짜리 사과' };
+          case 'bakery': return { name: '빵집', emoji: '🥐', item: '800원짜리 빵' };
+          case 'icecream': return { name: '아이스크림 트럭', emoji: '🍦', item: '700원짜리 아이스크림' };
+          default: return { name: '장난감 가게', emoji: '🧸', item: '700원짜리 곰인형' };
+        }
+      };
+
+      const themeInfo = getThemeInfo();
+
+      return (
+        <div className="space-y-6">
+          <div className="flex justify-center space-x-3">
+            <button
+              onClick={() => setSubMode('checkout')}
+              className={`px-5 py-2.5 rounded-full font-bold text-lg shadow-md transition-all ${subMode === 'checkout' ? 'bg-emerald-500 text-white ring-4 ring-emerald-200' : 'bg-white text-slate-600'}`}
+            >
+              3-1. 손님 맞이 계산하기 ({themeInfo.name})
+            </button>
+            <button
+              onClick={() => setSubMode('change')}
+              className={`px-5 py-2.5 rounded-full font-bold text-lg shadow-md transition-all ${subMode === 'change' ? 'bg-emerald-500 text-white ring-4 ring-emerald-200' : 'bg-white text-slate-600'}`}
+            >
+              3-2. 거스름돈 주기
+            </button>
+          </div>
+
+          {subMode === 'checkout' ? (
+            <div>
+              <CharacterGuide 
+                character={character} 
+                message={`손님이 찾아왔어요! "${themeInfo.item} 하나 주세요!" 정확히 700원을 계산대에 올려주세요.`} 
+                audioEnabled={audioEnabled}
+              />
+
+              <div className="bg-emerald-50 p-6 rounded-3xl border-4 border-emerald-200 max-w-2xl mx-auto shadow-inner space-y-4">
+                {/* Customer Banner */}
+                <div className="flex items-center justify-between bg-white p-4 rounded-2xl border-2 border-emerald-300 shadow-sm">
+                  <div className="flex items-center space-x-3">
+                    <span className="text-4xl">🐰</span>
+                    <div>
+                      <p className="text-sm text-slate-500 font-bold">손님의 주문</p>
+                      <p className="text-xl font-bold text-emerald-900">{themeInfo.emoji} {themeInfo.item}</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-xs text-slate-400 block font-bold">올려진 금액</span>
+                    <span className="text-2xl font-bold text-emerald-600">{currentSum.toLocaleString()}원</span>
+                  </div>
+                </div>
+
+                {/* Checkout Counter Tray */}
+                <div className="bg-amber-100/80 p-4 rounded-2xl border-4 border-amber-300 min-h-[140px] flex flex-wrap gap-2 items-center justify-center relative">
+                  {tableMoney.length === 0 ? (
+                    <p className="text-slate-400 font-bold">아래 화폐를 터치해서 여기에 올려주세요!</p>
+                  ) : (
+                    tableMoney.map((v, i) => (
+                      <CurrencyVisual key={i} value={v} scale={0.75} />
+                    ))
+                  )}
+                </div>
+
+                <div className="flex justify-between items-center pt-2">
+                  <button 
+                    onClick={clearTable}
+                    className="px-4 py-2 bg-rose-100 hover:bg-rose-200 text-rose-700 font-bold rounded-xl transition-all"
+                  >
+                    🔄 다시 놓기
+                  </button>
+
+                  <button 
+                    onClick={checkCheckout}
+                    className="px-8 py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xl rounded-2xl shadow-lg hover:scale-105 active:scale-95 transition-all ring-4 ring-emerald-200"
+                  >
+                    ✨ 계산 완료!
+                  </button>
+                </div>
+
+                {/* Coin selection palette */}
+                <div className="pt-4 border-t-2 border-emerald-200 flex justify-center space-x-4">
+                  <CurrencyVisual value={100} onClick={() => addMoney(100)} />
+                  <CurrencyVisual value={500} onClick={() => addMoney(500)} />
+                  <CurrencyVisual value={1000} onClick={() => addMoney(1000)} />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <CharacterGuide 
+                character={character} 
+                message="손님이 800원짜리 빵을 사고 1,000원을 냈어요! 돌려주어야 할 거스름돈은 얼마일까요?" 
+                audioEnabled={audioEnabled}
+              />
+
+              <div className="bg-emerald-50 p-6 rounded-3xl border-4 border-emerald-200 max-w-xl mx-auto shadow-inner text-center space-y-6">
+                <div className="flex justify-around items-center bg-white p-4 rounded-2xl border-2 border-emerald-300">
+                  <div className="text-center">
+                    <p className="text-xs text-slate-400 font-bold">내신 돈</p>
+                    <p className="text-xl font-bold text-blue-600">1,000원</p>
+                  </div>
+                  <span className="text-2xl font-bold text-slate-300">-</span>
+                  <div className="text-center">
+                    <p className="text-xs text-slate-400 font-bold">물건 값</p>
+                    <p className="text-xl font-bold text-rose-500">800원</p>
+                  </div>
+                  <span className="text-2xl font-bold text-slate-300">=</span>
+                  <div className="text-center">
+                    <p className="text-xs text-slate-400 font-bold">거스름돈</p>
+                    <p className="text-2xl font-bold text-emerald-600">?</p>
+                  </div>
+                </div>
+
+                <p className="font-bold text-slate-700">올바른 거스름돈 동전을 손님에게 전달하세요!</p>
+                
+                <div className="grid grid-cols-3 gap-4">
+                  {[100, 200, 300].map((val) => (
+                    <button
+                      key={val}
+                      onClick={() => handleChangePick(val)}
+                      className="p-4 bg-white border-4 border-emerald-300 hover:border-emerald-500 rounded-2xl flex flex-col items-center justify-center space-y-2 shadow-md hover:bg-emerald-100 transition-all active:scale-95"
+                    >
+                      <span className="text-3xl">🪙</span>
+                      <span className="text-2xl font-bold text-emerald-900">{val}원</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // --- MY ROOM & DECORATION ---
+    const MyRoom = ({ coins, onSpend, character }) => {
+      const [inventory, setInventory] = useState(['기본 벽지', '꼬마 의자']);
+      
+      const shopItems = [
+        { name: '황금 계산대', price: 30, icon: '🎰' },
+        { name: '무지개 카펫', price: 20, icon: '🏳️‍🌈' },
+        { name: '커다란 곰인형', price: 25, icon: '🧸' },
+        { name: '화려한 왕관', price: 40, icon: '👑' },
+      ];
+
+      const buyItem = (item) => {
+        if (inventory.includes(item.name)) return;
+        if (coins >= item.price) {
+          onSpend(item.price);
+          setInventory([...inventory, item.name]);
+          AudioEngine.playSuccess();
+          if (window.confetti) confetti({ particleCount: 40, spread: 60 });
+        } else {
+          AudioEngine.playTryAgain();
+          alert("행복 코인이 조금 더 필요해요! 문제를 더 풀어볼까요?");
+        }
+      };
+
+      return (
+        <div className="space-y-6 max-w-3xl mx-auto">
+          {/* Room View */}
+          <div className="bg-gradient-to-b from-pink-100 via-purple-50 to-amber-100 p-8 rounded-3xl border-4 border-pink-300 shadow-xl relative min-h-[260px] flex flex-col justify-between">
+            <div className="flex justify-between items-start">
+              <span className="bg-white/80 backdrop-blur px-4 py-1.5 rounded-full text-pink-700 font-bold border border-pink-300">
+                🏡 나만의 미니 마트 방
+              </span>
+              <div className="flex space-x-2">
+                {inventory.map((item, idx) => (
+                  <span key={idx} className="bg-white/80 px-3 py-1 rounded-full text-xs font-bold text-purple-700 border border-purple-200">
+                    {item}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Character in Room */}
+            <div className="flex justify-center items-end my-6 space-x-4">
+              <div className="text-center">
+                <div className="text-7xl animate-bounce-slow">
+                  {character === 'dondoni' ? '🐷' : '🐿️'}
+                </div>
+                <p className="bg-amber-300 px-3 py-0.5 rounded-full text-xs font-bold text-amber-900 inline-block shadow mt-1">
+                  점장 {character === 'dondoni' ? '돈돈이' : '토리'}
+                </p>
+              </div>
+
+              {/* Placed Decor Items */}
+              {inventory.includes('커다란 곰인형') && <span className="text-6xl">🧸</span>}
+              {inventory.includes('황금 계산대') && <span className="text-6xl">🎰</span>}
+            </div>
+          </div>
+
+          {/* Decor Shop */}
+          <div className="bg-white p-6 rounded-3xl border-4 border-purple-200 shadow-lg">
+            <h3 className="text-2xl font-bold text-purple-900 mb-4 flex items-center">
+              <span>🛍️ 상점 꾸미기 아이템</span>
+              <span className="ml-auto text-sm text-slate-500 font-normal">보유 코인: {coins}개</span>
+            </h3>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {shopItems.map((item) => {
+                const bought = inventory.includes(item.name);
+                return (
+                  <div key={item.name} className="p-4 rounded-2xl border-2 border-purple-100 bg-purple-50/50 flex flex-col items-center justify-between text-center space-y-2">
+                    <span className="text-4xl">{item.icon}</span>
+                    <span className="font-bold text-slate-800 text-sm">{item.name}</span>
+                    <button
+                      onClick={() => buyItem(item)}
+                      disabled={bought}
+                      className={`w-full py-2 rounded-xl font-bold text-xs transition-all ${
+                        bought 
+                          ? 'bg-slate-200 text-slate-500 cursor-not-allowed' 
+                          : 'bg-purple-500 hover:bg-purple-600 text-white shadow hover:scale-105 active:scale-95'
+                      }`}
+                    >
+                      {bought ? '보유 중' : `${item.price} 코인`}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // --- PARENT DASHBOARD & GATE MODAL ---
+    const ParentReportModal = ({ isOpen, onClose, stats }) => {
+      const [isUnlocked, setIsUnlocked] = useState(false);
+      const [num1] = useState(Math.floor(Math.random() * 5) + 3);
+      const [num2] = useState(Math.floor(Math.random() * 4) + 2);
+      const [answerInput, setAnswerInput] = useState('');
+
+      if (!isOpen) return null;
+
+      const handleGateSubmit = (e) => {
+        e.preventDefault();
+        if (parseInt(answerInput, 10) === (num1 + num2)) {
+          setIsUnlocked(true);
+        } else {
+          alert("정답이 아닙니다. 다시 시도해 주세요.");
+          setAnswerInput('');
+        }
+      };
+
+      return (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-lg rounded-3xl border-4 border-slate-300 shadow-2xl p-6 relative">
+            <button 
+              onClick={onClose}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 text-2xl font-bold"
+            >
+              ✕
+            </button>
+
+            {!isUnlocked ? (
+              <div className="text-center space-y-4 py-6">
+                <div className="text-5xl">🔒</div>
+                <h3 className="text-2xl font-bold text-slate-800">보호자 확인 (Parental Gate)</h3>
+                <p className="text-sm text-slate-500">어린이의 무단 접근을 방지하기 위해 아래 연산을 풀어주세요.</p>
+
+                <form onSubmit={handleGateSubmit} className="space-y-4 max-w-xs mx-auto">
+                  <div className="text-3xl font-bold text-indigo-600 bg-indigo-50 p-4 rounded-2xl border-2 border-indigo-200">
+                    {num1} + {num2} = ?
+                  </div>
+                  <input
+                    type="number"
+                    value={answerInput}
+                    onChange={(e) => setAnswerInput(e.target.value)}
+                    placeholder="정답 입력"
+                    className="w-full p-3 border-2 border-slate-300 rounded-xl text-center text-xl font-bold focus:border-indigo-500 outline-none"
+                    autoFocus
+                  />
+                  <button
+                    type="submit"
+                    className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-md hover:bg-indigo-700 transition-all"
+                  >
+                    확인 및 대시보드 열기
+                  </button>
+                </form>
+              </div>
+            ) : (
+              <div className="space-y-6 py-2">
+                <div className="border-b pb-3">
+                  <h3 className="text-2xl font-bold text-slate-800 flex items-center">
+                    <span>📊 학부모 학습 리포트</span>
+                    <span className="ml-2 text-xs bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full font-bold">Kid-Safe Area</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1">우리 아이의 화폐 인지 및 계산 학습 현황입니다.</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200">
+                    <p className="text-xs text-amber-700 font-bold">오늘 해결한 문제 수</p>
+                    <p className="text-3xl font-bold text-amber-900 mt-1">{stats.solvedCount}개</p>
+                  </div>
+                  <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-200">
+                    <p className="text-xs text-emerald-700 font-bold">획득한 행복 코인</p>
+                    <p className="text-3xl font-bold text-emerald-900 mt-1">{stats.totalCoins}개</p>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <h4 className="font-bold text-slate-800 text-sm">단계별 학습 이해도</h4>
+                  
+                  <div>
+                    <div className="flex justify-between text-xs font-bold text-slate-600 mb-1">
+                      <span>1단계: 화폐 크기 & 가치 인지</span>
+                      <span>90% (우수)</span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden">
+                      <div className="bg-pink-500 h-full w-[90%]"></div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between text-xs font-bold text-slate-600 mb-1">
+                      <span>2단계: 같은 화폐 모아 세기</span>
+                      <span>75% (양호)</span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden">
+                      <div className="bg-sky-500 h-full w-[75%]"></div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between text-xs font-bold text-slate-600 mb-1">
+                      <span>3단계: 실전 장보기 & 거스름돈</span>
+                      <span>60% (학습 중)</span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden">
+                      <div className="bg-emerald-500 h-full w-[60%]"></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-xs text-slate-600 space-y-1">
+                  <p className="font-bold text-slate-800">💡 코칭 팁:</p>
+                  <p>• 100원과 500원 동전의 가치 구분을 즐거워하고 있습니다.</p>
+                  <p>• 거스름돈 계산 시 1,000원에서 800원을 뺄 때 시각적 동전 지원이 효과적입니다.</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    // --- MAIN APP COMPONENT ---
+    const App = () => {
+      const [currentStage, setCurrentStage] = useState(1); // 1, 2, 3 or 'room'
+      const [happyCoins, setHappyCoins] = useState(25);
+      const [character, setCharacter] = useState('dondoni'); // 'dondoni' or 'tori'
+      const [theme, setTheme] = useState('toy'); // 'toy', 'fruit', 'bakery', 'icecream'
+      const [audioEnabled, setAudioEnabled] = useState(true);
+      const [isParentModalOpen, setIsParentModalOpen] = useState(false);
+
+      // Stats
+      const [solvedCount, setSolvedCount] = useState(3);
+
+      const handleStageSuccess = (earnedCoins) => {
+        setHappyCoins(prev => prev + earnedCoins);
+        setSolvedCount(prev => prev + 1);
+        speakText("우와! 완벽하게 계산을 완료했어요!", audioEnabled);
+      };
+
+      const handleSpendCoins = (amount) => {
+        setHappyCoins(prev => prev - amount);
+      };
+
+      const getThemeBg = () => {
+        switch(theme) {
+          case 'fruit': return 'from-emerald-100 via-teal-50 to-amber-50';
+          case 'bakery': return 'from-amber-100 via-orange-50 to-amber-50';
+          case 'icecream': return 'from-sky-100 via-indigo-50 to-pink-50';
+          default: return 'from-pink-100 via-purple-50 to-amber-50';
+        }
+      };
+
+      return (
+        <div className={`min-h-screen bg-gradient-to-b ${getThemeBg()} text-slate-800 pb-12 transition-colors duration-500`}>
+          {/* Top Navigation Bar */}
+          <header className="bg-white/80 backdrop-blur-md border-b-4 border-amber-200 sticky top-0 z-40 px-4 py-3 shadow-sm">
+            <div className="max-w-5xl mx-auto flex items-center justify-between">
+              
+              {/* App Brand Title */}
+              <div className="flex items-center space-x-2">
+                <span className="text-3xl">🏪</span>
+                <div>
+                  <h1 className="text-xl md:text-2xl font-bold text-amber-900 leading-none">
+                    미니 마트 사장님
+                  </h1>
+                  <span className="text-xs text-amber-700 font-bold">어린이 화폐 놀이</span>
+                </div>
+              </div>
+
+              {/* Central Happy Piggy Jar Counter */}
+              <div className="flex items-center bg-gradient-to-r from-amber-400 to-yellow-400 px-4 py-1.5 rounded-full border-2 border-amber-500 shadow-md glow-gold">
+                <span className="text-2xl mr-1">🏺</span>
+                <span className="text-amber-950 font-bold text-lg md:text-xl">{happyCoins}</span>
+                <span className="text-xs text-amber-900 font-bold ml-1">코인</span>
+              </div>
+
+              {/* Top Controls */}
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => setAudioEnabled(!audioEnabled)}
+                  className={`p-2 rounded-full border-2 text-lg shadow-sm transition-all ${
+                    audioEnabled ? 'bg-amber-100 border-amber-300 text-amber-800' : 'bg-slate-200 border-slate-300 text-slate-400'
+                  }`}
+                  title="음성 안내 켜기/끄기"
+                >
+                  {audioEnabled ? '🔊' : '🔇'}
+                </button>
+
+                <button
+                  onClick={() => setIsParentModalOpen(true)}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-xl shadow transition-all"
+                >
+                  🔒 학부모
+                </button>
+              </div>
+            </div>
+          </header>
+
+          <main className="max-w-4xl mx-auto px-4 pt-6 space-y-6">
+            {/* Helper & Theme Selector Switcher */}
+            <div className="flex flex-wrap items-center justify-between bg-white/70 p-3 rounded-2xl border-2 border-amber-200 gap-2">
+              <div className="flex items-center space-x-2">
+                <span className="text-xs font-bold text-slate-500">도우미:</span>
+                <button
+                  onClick={() => setCharacter('dondoni')}
+                  className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${character === 'dondoni' ? 'bg-pink-400 text-white shadow' : 'bg-white text-slate-600'}`}
+                >
+                  🐷 돈돈이
+                </button>
+                <button
+                  onClick={() => setCharacter('tori')}
+                  className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${character === 'tori' ? 'bg-amber-500 text-white shadow' : 'bg-white text-slate-600'}`}
+                >
+                  🐿️ 토리
+                </button>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <span className="text-xs font-bold text-slate-500">가게 배경:</span>
+                {[
+                  { id: 'toy', label: '🧸 장난감' },
+                  { id: 'fruit', label: '🍎 과일' },
+                  { id: 'bakery', label: '🍞 빵집' },
+                  { id: 'icecream', label: '🍦 아이스크림' },
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => setTheme(item.id)}
+                    className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all ${
+                      theme === item.id ? 'bg-amber-800 text-white shadow' : 'bg-white text-slate-600'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Stage Selector Tabs */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                { id: 1, title: '1단계: 화폐 알아보기', icon: '🪙', color: 'bg-pink-500' },
+                { id: 2, title: '2단계: 모아 세기', icon: '🚆', color: 'bg-sky-500' },
+                { id: 3, title: '3단계: 알뜰 장보기', icon: '🛒', color: 'bg-emerald-500' },
+                { id: 'room', title: '마이룸 꾸미기', icon: '🛋️', color: 'bg-purple-500' },
+              ].map((tab) => {
+                const isActive = currentStage === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setCurrentStage(tab.id)}
+                    className={`p-3 rounded-2xl font-bold flex flex-col items-center justify-center space-y-1 shadow-md transition-all active:scale-95 ${
+                      isActive 
+                        ? `${tab.color} text-white ring-4 ring-white` 
+                        : 'bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="text-2xl">{tab.icon}</span>
+                    <span className="text-sm leading-tight text-center">{tab.title}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Stage Content Render */}
+            <div className="mt-4">
+              {currentStage === 1 && (
+                <Stage1 
+                  onSuccess={handleStageSuccess} 
+                  character={character} 
+                  audioEnabled={audioEnabled} 
+                />
+              )}
+              {currentStage === 2 && (
+                <Stage2 
+                  onSuccess={handleStageSuccess} 
+                  character={character} 
+                  audioEnabled={audioEnabled} 
+                />
+              )}
+              {currentStage === 3 && (
+                <Stage3 
+                  onSuccess={handleStageSuccess} 
+                  character={character} 
+                  audioEnabled={audioEnabled}
+                  theme={theme}
+                />
+              )}
+              {currentStage === 'room' && (
+                <MyRoom 
+                  coins={happyCoins} 
+                  onSpend={handleSpendCoins} 
+                  character={character} 
+                />
+              )}
+            </div>
+          </main>
+
+          {/* Parent Report Modal */}
+          <ParentReportModal 
+            isOpen={isParentModalOpen} 
+            onClose={() => setIsParentModalOpen(false)} 
+            stats={{ solvedCount, totalCoins: happyCoins }}
+          />
+        </div>
+      );
+    };
+
+    // Render App
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
